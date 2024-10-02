@@ -11,6 +11,7 @@ openai = "^1.50.2"
 flask = "^3.0.3"
 transformers = "^4.45.1"
 torch = "^2.4.1"
+nltk = "^3.9.1"
 
 
 [build-system]

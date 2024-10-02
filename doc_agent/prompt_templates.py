@@ -30,9 +30,9 @@ Full Document: {full_document}
 
 CREATE_TODO_TEMPALTE = """
 Generate an enumerated list of sub-questions in order to answer the original questions. The output must be 
-in a format of the example shown. Do not use any external knowledge. Be concise and to the point. 
+in a format of the example shown. If the question does not have more than one part, do not output anything
+for the todo. Do not use any external knowledge. Be concise and to the point. 
 
--
 Here is an example: 
 Question: Who teaches Mathematics and what is their age? 
 
@@ -48,7 +48,21 @@ TODO:
 """
 
 REFINE_RESPONSE_TEMPLATE = """
+Refine the following answer to the question by removing unecessary words that do not directly add to the 
+answer. Do not use any external knowledge, Be concise and to the point. 
 
+Here is an example: 
+Question: What is the name of the teacher? 
+Response: The teacher's name is John Smith. 
+
+Refined response: John Smith 
+
+Now, it is your turn. 
+
+Question: {question}
+Response: {response}
+
+Refined response:
 """
 
 SUMMARIZE_RESPONSE_TEMPLATE = """
