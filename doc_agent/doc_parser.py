@@ -1,5 +1,6 @@
 import os
-import torch
+import gzip 
+import pickle
 import numpy as np 
 from prompt_templates import (
     QUERY_PROMPT, 
@@ -8,6 +9,7 @@ from prompt_templates import (
 )
 from model import Model
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 from typing import List
 from typing import Any
@@ -24,6 +26,7 @@ class Citation:
 
 
 EMBEDDING_MODEL = "text-embedding-ada-002"
+DB_PATH = Path(__file__).parent / "vector_db_store.pickle"
 
 
 class Preprocessor: 
@@ -60,17 +63,13 @@ class Preprocessor:
         else: 
             raise ValueError(f"'{file_type}' is not currently supported.")
 
-class Parser: 
+class DocHandler: 
     def __init__(self, model: Model, similarity_metric: Optional[str] = "cosine"):
         self.llm = model.llm
-
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-        ) 
         self.documents = [] 
         self.vector_store = np.array([])
-        if hasattr(Parser, f"{similarity_metric}_similarity"): 
-            self.similarity_fn = getattr(Parser, f"{similarity_metric}_similarity")
+        if hasattr(DocHandler, f"{similarity_metric}_similarity"): 
+            self.similarity_fn = getattr(DocHandler, f"{similarity_metric}_similarity")
         else: 
             raise ValueError(f"{similarity_metric} is NOT supported. Please choose 'cosine' or 'euclidean'.")
 
@@ -91,6 +90,17 @@ class Parser:
     
     def get_embedding_all(self, documents) -> np.ndarray:
         return np.array([self.get_embedding_single(doc) for doc in documents]) 
+
+    def load(self): 
+        with gzip.open(DB_PATH, "rb") as f: 
+            data = pickle.load(f)
+            self.documents = data["documents"] 
+            self.documents = data["vector_store"]
+
+    def save(self):
+        with gzip.open(DB_PATH, "wb") as f: 
+            updated_data = {"documents": self.documents, "vector_store": self.vector_store}
+            pickle.dump(updated_data, f)
 
     def add_file(self, path: str): 
         assert os.path.isfile(path), f"The path provided ({path}) could not be found."
@@ -128,16 +138,18 @@ class Parser:
         return QUERY_PROMPT.format(context=context, prompt=query)
 
 
+
+
 if __name__ == "__main__":
     m = Model(model_name="gpt-4o") 
-    parser = Parser(m)
+    parser = DocHandler(m)
     
     parser.add_file("/Users/sahil/Documents/doc_agent/doc_agent/data/Grades.csv")
 
     print(len(parser.documents))
     print(parser.vector_store.size)
 
-    prompt = "What did student 1 get in Math?"
+    prompt = "what is the capital of Australia?"
     citations = parser.search(prompt)
     new_prompt = parser.ground_query(prompt, citations)
     print(new_prompt)

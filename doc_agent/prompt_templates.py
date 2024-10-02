@@ -28,3 +28,29 @@ Raw Content: {content}
 Full Document: {full_document}
 """
 
+CREATE_TODO_TEMPALTE = """
+Generate an enumerated list of sub-questions in order to answer the original questions. The output must be 
+in a format of the example shown. Do not use any external knowledge. Be concise and to the point. 
+
+-
+Here is an example: 
+Question: Who teaches Mathematics and what is their age? 
+
+TODO: 
+1. Who teaches Mathematics?
+2. What is [response to 1]'s age?
+
+Now, it is your turn. 
+
+Question: {prompt}
+
+TODO:
+"""
+
+REFINE_RESPONSE_TEMPLATE = """
+
+"""
+
+SUMMARIZE_RESPONSE_TEMPLATE = """
+
+"""
