@@ -109,7 +109,7 @@ class DocAgent:
         return response
 
     def run(self, prompt: str) -> str: 
-        q = self._refine_question(prompt)
+        prompt = self._refine_question(prompt)
 
         print("Looking through data...")
         doc_inds = self._select_documents(prompt)
