@@ -1,134 +1,138 @@
-import re
-from model import Model 
-from doc_parser import DocHandler, Document
-from prompt_templates import (
+import io
+import ast
+import pandas as pd
+from doc_agent.model import Model, PythonCodeGen, DocumentSelection
+from doc_agent.data_store import DataHandler, DataFile
+from doc_agent.prompt_templates import (
     CREATE_TODO_TEMPALTE, 
-    REFINE_RESPONSE_TEMPLATE, 
-    SUMMARIZE_RESPONSE_TEMPLATE
+    SELECT_DOCUMENTS_TEMPLATE, 
+    QUERY_PROMPT_TEMPLATE,
+    GENERATE_CODE_TEMPLATE, 
+    DATAFRAME_INFO_TEMPLATE,
+    CORRECT_CODE_TEMPLATE
 )
-from dataclasses import dataclass
 from typing import Any
 from typing import Optional
+from typing import List
+from typing import Dict
 
 
-@dataclass 
-class Task: 
-    question: str 
-    response_from: Optional[int]
 
-@dataclass 
-class Result: 
-    question: str 
-    response: str
 
 class DocAgent: 
-    def __init__(self, model: Model, doc_handler: DocHandler): 
+    def __init__(self, model: Model, data_handler: DataHandler, max_code_retries: int = 5): 
         self.llm = model 
-        self.doc_handler = doc_handler
-        self.todo = []
-        self.results = []
-        self.steps_taken = 0
+        self.data_handler = data_handler
+        self.max_retries = max_code_retries
 
-    def _reset(self) -> None: 
-        self.todo = [] 
-        self.steps_taken = 0 
+    def _select_documents(self, prompt: str) -> List[int]:
+        doc_descriptions = "\n".join(
+            f"Document #{i}\nPath: {doc_file.path}\nSummary: {doc_file.summary}\n" for i, doc_file in enumerate(self.data_handler.data_store))
+        select_docs_prompt = SELECT_DOCUMENTS_TEMPLATE.format(doc_descriptions=doc_descriptions, question=prompt)
+        response = self.llm(select_docs_prompt, response_model=DocumentSelection)
+        
+        if -1 in response: 
+            return []
+        return response
 
-    def _is_completed(self) -> bool: 
-        if self.steps_taken > 0 and len(self.todo) == 0: 
-            self._reset()
-            return True 
-        return False
+    def _run_code(self, code: str) -> Dict[str, str]:
+        from contextlib import redirect_stdout
+        stdout_capture = io.StringIO()
 
-    def _requires_response(self, question: str) -> str: 
-        pattern = r'\[(.*?)\]'
-        match = re.search(pattern, question)
-        if match: 
-            return match.group(1)
-        return None
+        try: 
+            tree = ast.parse(code)
+            module = ast.Module(tree.body, type_ignores=[])
+            code = compile(module, filename="<ast>", mode="exec")
+            namespace = {'pd': pd}
 
-    def _insert_response_into_question(self, question: str, response: str) -> str: 
-        pattern = r'\[(.*?)\]'
-        return re.sub(pattern, response, question)
+            with redirect_stdout(stdout_capture):
+                exec(code, namespace)
+
+            # Capture any printed output
+            printed_output = stdout_capture.getvalue().strip()
     
-    def _has_numeric_prefix(self, question: str) -> bool: 
-        pattern = r'^\d+\.'
-        return bool(re.match(pattern, question))
+            if isinstance(tree.body[-1], ast.Expr):
+                output = eval(compile(ast.Expression(tree.body[-1].value), filename="<ast>", mode="eval"), namespace)
+                if printed_output: 
+                    return {"output": f"Printed:\n{printed_output}\n\nEval:\n{output}"}
+                return {"output": f"Eval:\n{output}"}
+            elif printed_output: 
+                return {"output": f"Printed:\n{printed_output}"}
+            else: 
+                return {"error": f"Error: The code executed successfully but no output was captured. Please output the result at the end of the code."}    
+        except Exception as e: 
+            return {"error": f"Error: {type(e).__name__}: {str(e)}"} 
+    
+    def _correct_code(self, original_query_prompt: str, current_code: str, error: str) -> str: 
+        correct_code_prompt = CORRECT_CODE_TEMPLATE.format(
+            original_query=original_query_prompt, current_code=current_code, error=error
+        )
+        response = self.llm(correct_code_prompt, response_model=PythonCodeGen)
+        return response
+
+    def _evaluate_code(self, original_query_prompt: str, code: str):
+        print("Testing code...") 
+        result = self._run_code(code)
+        print(result)
+        if "error" in result: 
+            for retry in range(self.max_retries): 
+                print(f"RETRY #{retry}")
+
+                corrected_code = self._correct_code(original_query_prompt, code, result["error"])
+                result = self._run_code(corrected_code)
+                if "error" not in result:
+                    break
+        return result
         
-    def _create_todo(self, prompt: str) -> None: 
-        todo_prompt = CREATE_TODO_TEMPALTE.format(prompt=prompt)
-        response = self.llm(todo_prompt)
+    def _attempt_task(self, prompt: str, doc_inds: List[int]) -> None:
+        context = ""
+        generate_code = False
+        for i in doc_inds: 
+            if self.data_handler.data_store[i].content_type == "dataframe":
+                context += f"\nDocument #{i}:\nContent:\n{DATAFRAME_INFO_TEMPLATE.format(path=self.data_handler.data_store[i].path, df_content=self.data_handler.data_store[i].content.head().to_string())}" 
+                generate_code = True 
+            else: 
+                context += f"\nDocument #{i}:\nContent: {self.data_handler.data_store[i].content}\n"
 
-        # TODO: remove this later
-        print(response)
-
-        tasks = response.split("\n")
-        for t in tasks: 
-            if not self._has_numeric_prefix(t): 
-                continue 
-
-            question = tuple(t.split(maxsplit=1))[1]
-            response_from = self._requires_response(question)
-            if response_from: 
-                response_from = int(response_from.split(" ")[-1])
-            self.todo.append(Task(question, response_from))
+        generate_code_prompt = "" if not generate_code else GENERATE_CODE_TEMPLATE
+        query_prompt = QUERY_PROMPT_TEMPLATE.format(context=context, prompt=prompt, generate_code=generate_code_prompt)
         
-        if len(self.todo) == 0: # No multi-facet question identified
-            self.todo.append(Task(prompt, None))
-
-
-    def _attempt_task(self, task: Task) -> None:
-        question = task.question 
-        if task.response_from: 
-            prev_result = self.results[task.response_from - 1]
-            question = self._insert_response_into_question(question, prev_result.response)
-
-        citations = self.doc_handler.search(question)
-        question_with_context = self.doc_handler.ground_query(question, citations)
-        response = self.llm(question_with_context)
-
-        # TODO error check the response (it had enough context)
-
-        refine_response_prompt = REFINE_RESPONSE_TEMPLATE.format(question=question, response=response)
-        refined_response = self.llm(refine_response_prompt)
-
-        self.results.append(Result(question, refined_response))
-
-        # verify TODO: remove later
-        # print(response)
+        if generate_code: 
+            print("Producing python code...")
+        response = self.llm(query_prompt, response_model=PythonCodeGen if generate_code else None)
+        if generate_code: 
+            return self._evaluate_code(query_prompt, response)
+        return response
 
     def run(self, prompt: str) -> str: 
-        while not self._is_completed(): 
-            self.step(prompt) 
+        print("Looking through data...")
+        doc_inds = self._select_documents(prompt)
+        if len(doc_inds) == 0: 
+            return "There is not enough relevant context to answer this question."
+    
+        print("Thinking...")
+        response = self._attempt_task(prompt, doc_inds)
 
-        # summarize_response_prompt = SUMMARIZE_RESPONSE_TEMPLATE.format()
-        # response = self.llm(summarize_response_prompt)
+        if isinstance(response, dict) and "output" in response: 
+            return response["output"]
+        return response
 
-        # print("final response: ", response)
-        # return response 
 
-        print(self.results)
-        return ""
-        
-    def step(self, prompt: str) -> None: 
-        if self.steps_taken == 0 and len(self.todo) == 0: 
-            self._create_todo(prompt) 
-        elif len(self.todo) > 0:
-            task = self.todo.pop(0)
-            self._attempt_task(task)
-        else: 
-            # pass?
-            pass
 
-        self.steps_taken += 1
-        
     
 if __name__ == "__main__": 
     model = Model("gpt-4o")
-    doc_handler = DocHandler(model)
-    da = DocAgent(model, doc_handler)
+    doc_handler = DataHandler(model)
+    agent = DocAgent(model, doc_handler)
 
     # prompt = "what is the name of the teacher who teaches 4th period on Wednesday and what is their age and summarize the syllabus of the class that they teach?"
     # prompt = "What is Ava Chen's age?"
     # prompt = "What is the syllabus for the subject taught in 3rd period on Monday?"
-    prompt = "What is the syllabus for chemistry?"
-    da.run(prompt)
+    # prompt = "What is the syllabus for chemistry?"
+    # prompt = "Which subject has the lowest average grade across all students? Find its syllabus."
+    # prompt = "What is the average grade for the subject taught in 1st period on Tuesday?"
+    prompt = "What are the averages of each subject?"
+    # prompt = "What is the 3rd element of the periodic table?"
+
+    response = agent.run(prompt)
+    print(response)
