@@ -78,7 +78,6 @@ class Model:
         
         if hasattr(completion, "python_code"):
             return completion.python_code
-        # print(completion.reasoning)
         return completion.document_ids
     
     def _format_message(self, prompt: str) -> List[Dict[str, str]]: 

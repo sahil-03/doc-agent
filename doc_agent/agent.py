@@ -11,8 +11,6 @@ from doc_agent.prompt_templates import (
     DATAFRAME_INFO_TEMPLATE,
     CORRECT_CODE_TEMPLATE
 )
-from typing import Any
-from typing import Optional
 from typing import List
 from typing import Dict
 
@@ -124,23 +122,3 @@ class DocAgent:
         if isinstance(response, dict) and "output" in response: 
             return response["output"]
         return response
-
-
-
-    
-if __name__ == "__main__": 
-    model = Model("gpt-4o")
-    doc_handler = DataHandler(model)
-    agent = DocAgent(model, doc_handler)
-
-    # prompt = "what is the name of the teacher who teaches 4th period on Wednesday and what is their age and summarize the syllabus of the class that they teach?"
-    # prompt = "What is Ava Chen's age?"
-    # prompt = "What is the syllabus for the subject taught in 3rd period on Monday?"
-    # prompt = "What is the syllabus for chemistry?"
-    # prompt = "Which subject has the lowest average grade across all students? Find its syllabus."
-    # prompt = "What is the average grade for the subject taught in 1st period on Tuesday?"
-    prompt = "What are the averages of each subject?"
-    # prompt = "What is the 3rd element of the periodic table?"
-
-    response = agent.run(prompt)
-    print(response)

@@ -72,6 +72,7 @@ class DataHandler:
 
         self._save_db()
 
+
 if __name__ == "__main__": 
     m = Model("gpt-4o")
     dh = DataHandler(m)
