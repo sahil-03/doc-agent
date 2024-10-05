@@ -4,6 +4,16 @@ from doc_agent.model import Model
 from doc_agent.data_store import DataHandler, DataFile
 
 
+## SAMPLE QUESTIONS 
+# prompt = "what is the name of the teacher who teaches 4th period on Wednesday and what is their age and summarize the syllabus of the class that they teach?"
+# prompt = "What is Ava Chen's age?"
+# prompt = "What is the syllabus for the subject taught in 3rd period on Monday?"
+# prompt = "What is the syllabus for chemistry?"
+# prompt = "Which subject has the lowest average grade across all students? Find its syllabus."
+# prompt = "What is the average grade for the subject taught in 1st period on Tuesday?"
+# prompt = "What are the averages of each subject?"
+# prompt = "What is the 3rd element of the periodic table?"
+
 if __name__ == "__main__": 
     parser = argparse.ArgumentParser(description="DocAgent: An agent that can answer questions about your data.")
     

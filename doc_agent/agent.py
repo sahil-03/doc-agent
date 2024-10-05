@@ -4,7 +4,7 @@ import pandas as pd
 from doc_agent.model import Model, PythonCodeGen, DocumentSelection
 from doc_agent.data_store import DataHandler, DataFile
 from doc_agent.prompt_templates import (
-    CREATE_TODO_TEMPALTE, 
+    REFINE_QUESTION_TEMPLATE,
     SELECT_DOCUMENTS_TEMPLATE, 
     QUERY_PROMPT_TEMPLATE,
     GENERATE_CODE_TEMPLATE, 
@@ -25,6 +25,12 @@ class DocAgent:
         self.data_handler = data_handler
         self.max_retries = max_code_retries
 
+    def _refine_question(self, prompt: str) -> str: 
+        refine_question_prompt = REFINE_QUESTION_TEMPLATE.format(prompt=prompt)
+        response = self.llm(refine_question_prompt)
+        print(response)
+        return response 
+    
     def _select_documents(self, prompt: str) -> List[int]:
         doc_descriptions = "\n".join(
             f"Document #{i}\nPath: {doc_file.path}\nSummary: {doc_file.summary}\n" for i, doc_file in enumerate(self.data_handler.data_store))
@@ -105,6 +111,8 @@ class DocAgent:
         return response
 
     def run(self, prompt: str) -> str: 
+        q = self._refine_question(prompt)
+
         print("Looking through data...")
         doc_inds = self._select_documents(prompt)
         if len(doc_inds) == 0: 
